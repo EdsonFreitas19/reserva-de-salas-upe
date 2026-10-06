@@ -1,0 +1,17 @@
+{
+  "name": "reserva-ambientes-upe",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "npm install && npm --prefix backend install && npm --prefix frontend install && node -e \"const fs=require('fs');if(!fs.existsSync('backend/.env'))fs.copyFileSync('backend/.env.example','backend/.env')\"",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "seed": "npm --prefix backend run seed",
+    "dev": "concurrently -n api,web -c blue,red \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "test": "npm --prefix backend test",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

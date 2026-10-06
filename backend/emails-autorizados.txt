@@ -1,0 +1,11 @@
+# ============================================================================
+#  EXCEÇÕES: e-mails FORA do domínio @upe.br que também podem entrar
+# ============================================================================
+#  - Quem tem e-mail @upe.br já entra sem precisar estar aqui.
+#  - Um e-mail por linha. Linhas que começam com # são comentários.
+#  - Aqui ficam só contas de teste/exceções. Salve o arquivo: vale na hora, sem reiniciar.
+#  - O administrador também pode cadastrar/remover pela tela Administração → Usuários.
+# ============================================================================
+
+edsonnn695@gmail.com
+w.edsonfreitas19@gmail.com

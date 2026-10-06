@@ -1,0 +1,20 @@
+# Sobe apenas o PostgreSQL 16 (o back-end e o front rodam com npm, direto na sua máquina)
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reserva
+      POSTGRES_PASSWORD: reserva
+      POSTGRES_DB: reserva_upe
+    ports:
+      - "5433:5432"   # 5433 no seu PC (evita conflito com um PostgreSQL já instalado na 5432)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reserva -d reserva_upe"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  pgdata:

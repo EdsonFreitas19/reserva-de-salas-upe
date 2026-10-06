@@ -1,0 +1,21 @@
+/** Áreas do desenho original do mapa (usadas por "Restaurar áreas ausentes" no editor). Mesmo conteúdo da migration 007. */
+export const AREAS_PADRAO: { numero: number; rotulo: string; tipo: string; pontos: [number, number][] }[] = [
+  { numero: 1, rotulo: "NTI", tipo: "Administrativo", pontos: [[512, 151], [574, 151], [574, 211], [512, 211]] },
+  { numero: 2, rotulo: "Banheiro", tipo: "Serviços", pontos: [[410, 151], [512, 151], [512, 211], [410, 211]] },
+  { numero: 3, rotulo: "Laboratório 01", tipo: "Laboratório", pontos: [[288, 151], [410, 151], [410, 211], [288, 211]] },
+  { numero: 4, rotulo: "Sala integrada", tipo: "Sala de aula", pontos: [[210, 151], [288, 151], [288, 211], [210, 211]] },
+  { numero: 5, rotulo: "Sala de aula 03", tipo: "Sala de aula", pontos: [[138, 151], [210, 151], [210, 211], [138, 211]] },
+  { numero: 6, rotulo: "Sala de aula 02", tipo: "Sala de aula", pontos: [[30, 131], [138, 131], [138, 211], [30, 211]] },
+  { numero: 7, rotulo: "Sala de aula 01", tipo: "Sala de aula", pontos: [[30, 40], [138, 40], [138, 131], [30, 131]] },
+  { numero: 8, rotulo: "Sala de convivência", tipo: "Espaço de uso comum", pontos: [[138, 40], [210, 40], [210, 100], [138, 100]] },
+  { numero: 9, rotulo: "PPGEC", tipo: "Administrativo", pontos: [[210, 40], [288, 40], [288, 100], [210, 100]] },
+  { numero: 10, rotulo: "Laboratório 02", tipo: "Laboratório", pontos: [[288, 40], [410, 40], [410, 100], [288, 100]] },
+  { numero: 11, rotulo: "Biblioteca", tipo: "Espaço de uso comum", pontos: [[410, 40], [512, 40], [512, 100], [410, 100]] },
+  { numero: 12, rotulo: "inLab", tipo: "Laboratório", pontos: [[512, 40], [574, 40], [574, 100], [512, 100]] },
+  { numero: 13, rotulo: "Auditório", tipo: "Espaço de uso comum", pontos: [[640, 40], [845, 40], [845, 100], [640, 100]] },
+  { numero: 14, rotulo: "Escolaridade", tipo: "Administrativo", pontos: [[845, 40], [926, 40], [926, 100], [845, 100]] },
+  { numero: 15, rotulo: "Sala dos professores", tipo: "Administrativo", pontos: [[926, 40], [1064, 40], [1064, 211], [974, 211], [974, 100], [926, 100]] },
+  { numero: 16, rotulo: "Cozinha", tipo: "Serviços", pontos: [[926, 151], [974, 151], [974, 211], [926, 211]] },
+  { numero: 17, rotulo: "DotLab + PPGEC", tipo: "Laboratório", pontos: [[845, 151], [926, 151], [926, 211], [845, 211]] },
+  { numero: 18, rotulo: "LAMIE", tipo: "Laboratório", pontos: [[640, 151], [845, 151], [845, 211], [640, 211]] },
+];
