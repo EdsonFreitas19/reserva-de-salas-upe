@@ -9,6 +9,7 @@ import { reservaRoutes } from './routes/reservas.js';
 import { tipoRoutes } from './routes/tipos.js';
 import { mapaRoutes, MAX_BYTES } from './routes/mapa.js';
 import { notificacaoRoutes } from './routes/notificacoes.js';
+import { configuracaoRoutes } from './routes/configuracao.js';
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -37,5 +38,6 @@ export function buildApp() {
   app.register(notificacaoRoutes);
   app.register(mapaRoutes);
   app.register(tipoRoutes);
+  app.register(configuracaoRoutes);
   return app;
 }

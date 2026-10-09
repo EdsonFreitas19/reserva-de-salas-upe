@@ -143,15 +143,16 @@ Estão todas em **`backend/src/config.ts`**, no objeto `regras`, para mudar em u
 | Regra | Valor adotado no MVP |
 |---|---|
 | RN03 — pendente bloqueia o horário? | **Não.** Só reservas aprovadas bloqueiam; várias pendentes podem coexistir. A autoridade vê um aviso quando há pedidos conflitantes anteriores. |
-| RN04 — duração máxima | **4 horas** |
-| Dias permitidos | **Somente segunda a sexta**; a reserva começa e termina no mesmo dia |
+| RN04 — duração máxima | **Definida pelo administrador** (Administração → *Regras de reserva*; padrão 4 horas) |
+| Dias permitidos | **Todos os dias da semana**, inclusive sábado e domingo; a reserva começa e termina no mesmo dia |
+| Período máximo de reserva | **Definido pelo administrador**, em meses a partir de hoje (padrão 1 mês; Administração → *Regras de reserva*). Dias além do limite nem aparecem na agenda e o servidor recusa o pedido. Os horários ocupados (aulas) podem ser cadastrados para qualquer período |
 | Quem pode usar | Apenas **professores e funcionários**: e-mails `@upe.br`, mais as exceções de `backend/emails-autorizados.txt` (contas de teste) |
 | Vários responsáveis | Cada ambiente pode ter **vários responsáveis**; basta **um** aprovar. Ao aprovar, pendentes que conflitam são recusadas automaticamente (com aviso ao solicitante) |
 | Horários ocupados | O admin cadastra (em *Responsáveis e horários*) aulas e usos fixos por dia da semana/horário/período. Aparecem como **Ocupado** na agenda e bloqueiam novas solicitações |
-| Cancelar aprovada | A **autoridade** do ambiente pode cancelar uma reserva **aprovada que ainda não começou**, informando o motivo; o solicitante recebe notificação com o motivo. O admin não cancela |
+| Cancelar aprovada | A **autoridade** do ambiente pode cancelar uma reserva **aprovada que ainda não começou**, informando o motivo; o solicitante recebe notificação com o motivo. O admin também pode cancelar, em qualquer ambiente |
 | Sem intervalo entre reservas | Não há folga obrigatória entre uma reserva e outra |
 | RN05 — antecedência mínima | Basta o horário ser no futuro. Cancelamento de aprovada permitido até o início. |
-| RN08 — admin decide em qualquer ambiente? | **Não (decidido).** Só a autoridade responsável pelo ambiente aprova/recusa. O admin apenas designa os responsáveis (aba Usuários) e consulta tudo; não pode ser responsável nem aprovar. |
+| RN08 — admin decide em qualquer ambiente? | **Sim.** O administrador aprova, recusa e cancela reservas de **todos** os ambientes (tela Aprovações), sem ser listado como responsável por eles. Ele não pode ser indicado como responsável de uma sala. |
 | Ambiente sem responsável | **Não aceita solicitações** (como o admin não aprova, o pedido ficaria parado). O admin precisa definir o responsável primeiro. |
 | Excluir ambiente | Pode excluir mesmo com histórico: as reservas antigas continuam aparecendo com o **nome que o ambiente tinha na época**. Só não dá para excluir se houver reservas pendentes/aprovadas ainda por acontecer (recuse ou cancele antes). Ao **renomear**, o histórico também mantém o nome antigo. |
 | RN10 — prioridade automática? | **Não.** Ordem de chegada é só informativa; a decisão é manual. |

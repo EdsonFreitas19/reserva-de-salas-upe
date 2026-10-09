@@ -40,10 +40,12 @@ export async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
   if (!isAdmin(req.auth)) return reply.code(403).send({ erro: 'Apenas administradores' });
 }
 
-/** RNF02 + RN08: só a autoridade responsável pelo ambiente decide (nem o admin). */
-// O administrador só DESIGNA responsáveis; nunca decide reservas.
+/**
+ * RNF02 + RN08: quem pode aprovar, recusar e cancelar reservas de um ambiente.
+ * O administrador pode em TODOS os ambientes (sem ser listado como responsável); a autoridade, só nos dela.
+ */
 export async function podeDecidir(a: Auth, ambienteId: number): Promise<boolean> {
-  if (isAdmin(a)) return false;
+  if (isAdmin(a)) return true;
   const { rowCount } = await pool.query(
     'SELECT 1 FROM ambiente_autoridade WHERE ambiente_id = $1 AND usuario_id = $2',
     [ambienteId, a.id],

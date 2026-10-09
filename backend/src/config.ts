@@ -29,13 +29,12 @@ export const config = {
 export const regras = {
   /** RN03: reserva PENDENTE não bloqueia o horário; só as APROVADAS bloqueiam. (Informativo — o código já segue isto.) */
   pendenteBloqueia: false,
-  /** RN04: duração máxima de uma reserva, em horas. */
-  duracaoMaximaHoras: 4,
+  // Duração máxima de cada reserva e até quantos meses à frente se pode reservar: agora são ajustados
+  // pelo administrador na tela (tabela `configuracao`, ver routes/configuracao.ts).
   /** RN05: antecedência mínima para solicitar, em minutos (0 = basta ser no futuro). */
   antecedenciaMinimaMin: 0,
-  /** Reservas só em dias de semana. Padrão ISO: 1 = segunda ... 5 = sexta. */
-  diasPermitidos: [1, 2, 3, 4, 5],
+  // Reservas podem ser feitas em qualquer dia da semana (inclusive sábado e domingo).
   /** Fuso em que "dia" e "hora" são contados (reserva e horários ocupados). */
   fuso: 'America/Recife',
-  /** RN08: SÓ a autoridade do ambiente aprova/recusa. O admin define os responsáveis e consulta tudo. */
+  /** RN08: a autoridade do ambiente aprova/recusa; o administrador também pode decidir em qualquer ambiente. */
 };

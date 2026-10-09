@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { isExclusionViolation, pool, tx } from '../db.js';
 import { isAdmin, podeDecidir, requireAdmin, requireAuth } from '../auth.js';
 import { regras } from '../config.js';
+import { lerRegrasReserva } from './configuracao.js';
 import { HttpError } from '../app.js';
 
 const idParam = z.object({ id: z.coerce.number().int() });
@@ -38,23 +39,25 @@ export async function reservaRoutes(app: FastifyInstance) {
 
     if (fim <= inicio) throw new HttpError(400, 'O horário final deve ser depois do inicial');
     if (inicio.getTime() < Date.now() + regras.antecedenciaMinimaMin * 60_000) throw new HttpError(400, 'O horário deve estar no futuro');
-    if ((fim.getTime() - inicio.getTime()) / 3_600_000 > regras.duracaoMaximaHoras)
-      throw new HttpError(400, `Duração máxima: ${regras.duracaoMaximaHoras} horas`);
+    // Limites definidos pelo administrador: duração máxima e até quando se pode reservar
+    const lim = await lerRegrasReserva();
+    if ((fim.getTime() - inicio.getTime()) / 3_600_000 > lim.duracao_max_horas)
+      throw new HttpError(400, `Duração máxima: ${lim.duracao_max_horas} ${lim.duracao_max_horas === 1 ? 'hora' : 'horas'}`);
 
-    // Dia e hora contam no horário local (Recife): reserva no mesmo dia e só em dias de semana
+    // Dia e hora contam no horário local (Recife): reserva no mesmo dia (qualquer dia da semana, inclusive fim de semana)
     const loc = (await pool.query(
-      `SELECT (a AT TIME ZONE $3)::date::text AS dia, (b AT TIME ZONE $3)::date::text AS dia_fim,
-              EXTRACT(ISODOW FROM (a AT TIME ZONE $3))::int AS isodow
+      `SELECT (a AT TIME ZONE $3)::date::text AS dia, (b AT TIME ZONE $3)::date::text AS dia_fim
          FROM (SELECT $1::timestamptz AS a, $2::timestamptz AS b) x`,
       [b.inicio, b.fim, regras.fuso],
     )).rows[0];
     if (loc.dia !== loc.dia_fim) throw new HttpError(400, 'A reserva deve começar e terminar no mesmo dia');
-    if (!regras.diasPermitidos.includes(loc.isodow)) throw new HttpError(400, 'Reservas só podem ser feitas de segunda a sexta-feira');
+    if (loc.dia > lim.limite) // datas 'AAAA-MM-DD' se comparam como texto
+      throw new HttpError(400, `Só é possível reservar até ${lim.limite.split('-').reverse().join('/')}`);
 
     const amb = await pool.query('SELECT nome, ativo FROM ambiente WHERE id = $1', [b.ambiente_id]);
     if (!amb.rows[0]) throw new HttpError(404, 'Ambiente não encontrado');
     if (!amb.rows[0].ativo) throw new HttpError(400, 'Ambiente desativado'); // RN12
-    // como o admin não aprova, um ambiente sem responsável deixaria a solicitação parada para sempre
+    // ambiente sem responsável não recebe aviso de solicitação (só o administrador poderia decidir)
     const resp = await pool.query('SELECT 1 FROM ambiente_autoridade WHERE ambiente_id = $1 LIMIT 1', [b.ambiente_id]);
     if (!resp.rowCount) throw new HttpError(400, 'Este ambiente ainda não tem um responsável para aprovar reservas. Fale com o administrador.');
 
@@ -139,19 +142,19 @@ export async function reservaRoutes(app: FastifyInstance) {
 
   // Reservas APROVADAS que ainda não começaram, nos ambientes do responsável (para ele poder cancelar, se precisar)
   app.get('/api/reservas/aprovadas', async (req) => {
-    if (!req.auth.papeis.includes('AUTORIDADE')) throw new HttpError(403, 'Apenas autoridades');
+    if (!req.auth.papeis.includes('AUTORIDADE') && !isAdmin(req.auth)) throw new HttpError(403, 'Apenas autoridades');
     const { rows } = await pool.query(
       `SELECT r.id, r.ambiente_id, r.ambiente_nome, u.nome AS solicitante_nome, r.inicio, r.fim, r.finalidade
          FROM reserva r LEFT JOIN ambiente a ON a.id = r.ambiente_id JOIN usuario u ON u.id = r.solicitante_id
         WHERE r.status = 'APROVADA' AND r.inicio > now()
-          AND EXISTS (SELECT 1 FROM ambiente_autoridade aa WHERE aa.ambiente_id = r.ambiente_id AND aa.usuario_id = $1)
+          AND ($2 OR EXISTS (SELECT 1 FROM ambiente_autoridade aa WHERE aa.ambiente_id = r.ambiente_id AND aa.usuario_id = $1))
         ORDER BY r.inicio`,
-      [req.auth.id],
+      [req.auth.id, isAdmin(req.auth)], // o administrador vê as de todos os ambientes
     );
     return rows;
   });
 
-  // A autoridade do ambiente cancela uma reserva JÁ APROVADA, a qualquer momento antes de ela começar.
+  // A autoridade do ambiente (ou o administrador) cancela uma reserva JÁ APROVADA, a qualquer momento antes de ela começar.
   // O motivo é obrigatório e vai numa notificação para quem solicitou. (Pendentes se recusam, com justificativa.)
   app.post('/api/reservas/:id/cancelar-pela-autoridade', async (req) => {
     const { id } = idParam.parse(req.params);
@@ -180,7 +183,7 @@ export async function reservaRoutes(app: FastifyInstance) {
 
   // RF10: pendentes dos ambientes sob responsabilidade da autoridade
   app.get('/api/reservas/pendentes', async (req) => {
-    if (!req.auth.papeis.includes('AUTORIDADE')) throw new HttpError(403, 'Apenas autoridades');
+    if (!req.auth.papeis.includes('AUTORIDADE') && !isAdmin(req.auth)) throw new HttpError(403, 'Apenas autoridades');
     const { rows } = await pool.query(
       `SELECT r.id, r.ambiente_id, r.ambiente_nome, u.nome AS solicitante_nome, r.inicio, r.fim,
               r.finalidade, r.criado_em,
@@ -191,9 +194,9 @@ export async function reservaRoutes(app: FastifyInstance) {
                   AND x.id <> r.id AND x.criado_em < r.criado_em AND x.inicio < r.fim AND x.fim > r.inicio) AS pendentes_anteriores
          FROM reserva r LEFT JOIN ambiente a ON a.id = r.ambiente_id JOIN usuario u ON u.id = r.solicitante_id
         WHERE r.status = 'PENDENTE'
-          AND EXISTS (SELECT 1 FROM ambiente_autoridade aa WHERE aa.ambiente_id = r.ambiente_id AND aa.usuario_id = $1)
+          AND ($2 OR EXISTS (SELECT 1 FROM ambiente_autoridade aa WHERE aa.ambiente_id = r.ambiente_id AND aa.usuario_id = $1))
         ORDER BY r.criado_em`,
-      [req.auth.id],
+      [req.auth.id, isAdmin(req.auth)], // o administrador vê as de todos os ambientes
     );
     return rows;
   });

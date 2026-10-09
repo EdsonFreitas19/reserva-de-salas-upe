@@ -53,6 +53,7 @@ async function novoAmbiente(nome: string, responsaveis: string[] = []) {
 
 beforeAll(async () => {
   await migrate();
+  await pool.query('UPDATE configuracao SET periodo_max_meses = 24'); // os testes usam datas distantes; o limite é testado à parte
   await criarUsuario(ADMIN, ['USUARIO', 'ADMIN']);
   await criarUsuario(AUT, ['USUARIO', 'AUTORIDADE']);
   await criarUsuario(AUT2, ['USUARIO', 'AUTORIDADE']);
@@ -71,17 +72,19 @@ describe('regras de reserva', () => {
     expect((await app.inject({ method: 'GET', url: '/api/ambientes' })).statusCode).toBe(401);
   });
 
-  it('valida horário: fim depois do início, máximo de 4 horas, mesmo dia, só dias úteis', async () => {
+  it('valida horário: fim depois do início, máximo de 4 horas (padrão), mesmo dia; fim de semana é permitido', async () => {
     expect((await pedir(A, 4, 12, 10)).statusCode).toBe(400);
     const longa = await pedir(A, 4, 8, 13); // 5 horas
     expect(longa.statusCode).toBe(400);
     expect(longa.json().erro).toMatch(/4 horas/);
     expect((await pedir(A, 4, 8, 12)).statusCode).toBe(201); // exatamente 4 horas é permitido
 
-    const sab = proximoSabado();
-    const fds = await call(A, 'POST', '/api/reservas', { ambiente_id: ambienteId, inicio: iso(sab, 8), fim: iso(sab, 10), finalidade: 'Sábado' });
-    expect(fds.statusCode).toBe(400);
-    expect(fds.json().erro).toMatch(/segunda a sexta/);
+    // sábado e domingo também aceitam reservas
+    const sab = proximoSabado(), dom = new Date(new Date(`${sab}T12:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
+    for (const dia of [sab, dom]) {
+      const r = await call(A, 'POST', '/api/reservas', { ambiente_id: ambienteId, inicio: iso(dia, 8), fim: iso(dia, 10), finalidade: 'Fim de semana' });
+      expect(r.statusCode).toBe(201);
+    }
 
     const d = diaUtil(4), d2 = diaUtil(5);
     const viraDia = await call(A, 'POST', '/api/reservas', { ambiente_id: ambienteId, inicio: iso(d, 22), fim: `${d2}T01:00:00-03:00`, finalidade: 'Vira o dia' });
@@ -163,14 +166,32 @@ describe('regras de reserva', () => {
     await expect(pool.query("UPDATE historico_status SET motivo = 'x'")).rejects.toThrow(/imutável/);
   });
 
-  it('RN08: o admin NÃO aprova, recusa nem cancela; só consulta', async () => {
+  it('RN08: o admin aprova, recusa e cancela em QUALQUER ambiente, sem ser responsável por ele', async () => {
+    // pedido numa sala em que o admin NÃO é responsável (e nunca pode ser)
     const id = (await pedir(A, 8, 8, 10)).json().id;
-    expect((await aprovar(ADMIN, id)).statusCode).toBe(403);
-    expect((await call(ADMIN, 'POST', `/api/reservas/${id}/recusar`, { justificativa: 'não pode' })).statusCode).toBe(403);
-    expect((await call(ADMIN, 'POST', `/api/reservas/${id}/cancelar-pela-autoridade`, { motivo: 'não pode' })).statusCode).toBe(403);
-    expect((await call(ADMIN, 'GET', '/api/reservas/pendentes')).statusCode).toBe(403);
+    const vendo = (await call(ADMIN, 'GET', '/api/reservas/pendentes')).json() as { id: number }[];
+    expect(vendo.some((r) => r.id === id)).toBe(true); // o admin vê as pendentes de todos os ambientes
+    expect((await aprovar(ADMIN, id)).statusCode).toBe(200);
+    expect(await statusDe(id)).toBe('APROVADA');
+    expect((await notifs(A)).some((n) => /APROVADA/.test(n.mensagem))).toBe(true);
+    const aprovadas = (await call(ADMIN, 'GET', '/api/reservas/aprovadas')).json() as { id: number }[];
+    expect(aprovadas.some((r) => r.id === id)).toBe(true);
+    expect((await call(ADMIN, 'POST', `/api/reservas/${id}/cancelar-pela-autoridade`, { motivo: 'Manutenção da sala' })).statusCode).toBe(200);
+    expect(await statusDe(id)).toBe('CANCELADA');
+
+    const id2 = (await pedirEm(outroAmbienteId, A, 8, 8, 10)).json().id; // outro ambiente, outro responsável
+    expect((await call(ADMIN, 'POST', `/api/reservas/${id2}/recusar`, { justificativa: 'Sala em reforma' })).statusCode).toBe(200);
+    expect(await statusDe(id2)).toBe('RECUSADA');
     expect((await call(ADMIN, 'GET', `/api/reservas/${id}/historico`)).statusCode).toBe(200);
-    expect((await aprovar(AUT, id)).statusCode).toBe(200);
+
+    // quem não é admin nem responsável continua sem poder decidir
+    const id3 = (await pedir(A, 8, 13, 15)).json().id;
+    expect((await aprovar(OUTRA, id3)).statusCode).toBe(403);
+    expect((await aprovar(A, id3)).statusCode).toBe(403);
+    expect((await aprovar(AUT, id3)).statusCode).toBe(200);
+    // e o admin continua sem poder ser listado como responsável
+    const amb = (await call(ADMIN, 'GET', '/api/ambientes?todos=1')).json() as { id: number; autoridades: { id: number }[] }[];
+    expect(amb.every((a) => a.autoridades.every((r) => r.id !== ids[ADMIN]))).toBe(true);
   });
 
   it('a autoridade cancela reserva aprovada (antes de começar) com motivo, e o solicitante é avisado', async () => {
@@ -220,11 +241,12 @@ describe('regras de reserva', () => {
     expect((await call(A, 'GET', '/api/reservas/aprovadas')).statusCode).toBe(403);
   });
 
-  it('pendentes: cada responsável vê as do seu ambiente; usuário e admin não', async () => {
+  it('pendentes: cada responsável vê as do seu ambiente; o admin vê todas; usuário comum não', async () => {
     await pedir(A, 12, 8, 9);
     expect((await call(AUT, 'GET', '/api/reservas/pendentes')).json().length).toBeGreaterThan(0);
     expect((await call(AUT2, 'GET', '/api/reservas/pendentes')).json().length).toBeGreaterThan(0);
     expect((await call(OUTRA, 'GET', '/api/reservas/pendentes')).json()).toHaveLength(0);
+    expect((await call(ADMIN, 'GET', '/api/reservas/pendentes')).json().length).toBeGreaterThan(0);
     expect((await call(A, 'GET', '/api/reservas/pendentes')).statusCode).toBe(403);
     expect((await call(A, 'GET', '/api/reservas')).statusCode).toBe(403);
     expect((await call(ADMIN, 'GET', '/api/reservas')).statusCode).toBe(200);
@@ -294,7 +316,7 @@ describe('responsáveis (vários por ambiente)', () => {
     expect(mantem.rowCount).toBe(1); // AUT segue responsável por outros ambientes
   });
 
-  it('ambiente sem responsável não aceita solicitações (o admin não aprova, ficaria parado)', async () => {
+  it('ambiente sem responsável não aceita solicitações (ninguém seria avisado)', async () => {
     const amb = await novoAmbiente('Sala Sem Responsável');
     const r = await pedirEm(amb, A, 13, 8, 9);
     expect(r.statusCode).toBe(400);
@@ -310,7 +332,7 @@ describe('horários ocupados (aulas fixas, definidos pelo admin)', () => {
     const url = `/api/ambientes/${lab}/bloqueios`;
 
     expect((await call(A, 'POST', url, corpo)).statusCode).toBe(403);
-    expect((await call(ADMIN, 'POST', url, { ...corpo, dias_semana: [6] })).statusCode).toBe(400);      // fim de semana
+    expect((await call(ADMIN, 'POST', url, { ...corpo, dias_semana: [8] })).statusCode).toBe(400);      // dia da semana inexistente
     expect((await call(ADMIN, 'POST', url, { ...corpo, hora_fim: '07:00' })).statusCode).toBe(400);     // fim antes do início
     const criado = await call(ADMIN, 'POST', url, corpo);
     expect(criado.statusCode).toBe(201);
@@ -349,6 +371,70 @@ describe('horários ocupados (aulas fixas, definidos pelo admin)', () => {
     expect(r.statusCode).toBe(409);
     expect(r.json().erro).toMatch(/ocupado/);
     expect(await statusDe(pend)).toBe('PENDENTE'); // segue pendente: a autoridade deve recusar
+  });
+});
+
+describe('regras de reserva ajustáveis pelo administrador', () => {
+  const somaDias = (dia: string, n: number) => new Date(new Date(`${dia}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+  const salvar = (periodo: number, horas: number) => call(ADMIN, 'PUT', '/api/configuracao', { periodo_max_meses: periodo, duracao_max_horas: horas });
+  const reservarEm = (amb: number, dia: string, ini = 8, fim = 9) =>
+    call(A, 'POST', '/api/reservas', { ambiente_id: amb, inicio: iso(dia, ini), fim: iso(dia, fim), finalidade: 'Teste de limite' });
+
+  it('todos consultam; só o admin altera; valores inválidos são recusados', async () => {
+    const c = (await call(A, 'GET', '/api/configuracao')).json();
+    expect(c).toMatchObject({ periodo_max_meses: 24, duracao_max_horas: 4 });
+    expect(c.limite > c.hoje).toBe(true);
+    expect((await call(A, 'PUT', '/api/configuracao', { periodo_max_meses: 2, duracao_max_horas: 4 })).statusCode).toBe(403);
+    expect((await call(AUT, 'PUT', '/api/configuracao', { periodo_max_meses: 2, duracao_max_horas: 4 })).statusCode).toBe(403);
+    expect((await salvar(0, 4)).statusCode).toBe(400);
+    expect((await salvar(25, 4)).statusCode).toBe(400);
+    expect((await salvar(1, 0)).statusCode).toBe(400);
+    expect((await salvar(1, 25)).statusCode).toBe(400);
+    expect((await salvar(1.5, 4)).statusCode).toBe(400);
+    expect((await call(ADMIN, 'PUT', '/api/configuracao', { periodo_max_meses: 2 })).statusCode).toBe(400);
+  });
+
+  it('a duração máxima vem da configuração', async () => {
+    const amb = await novoAmbiente('Sala Duração', [AUT]);
+    const dia = diaUtil(2);
+    try {
+      expect((await salvar(24, 2)).statusCode).toBe(200);
+      const longa = await reservarEm(amb, dia, 8, 11); // 3 horas
+      expect(longa.statusCode).toBe(400);
+      expect(longa.json().erro).toMatch(/2 horas/);
+      expect((await reservarEm(amb, dia, 8, 10)).statusCode).toBe(201);
+      expect((await salvar(24, 6)).statusCode).toBe(200);
+      expect((await reservarEm(amb, dia, 12, 18)).statusCode).toBe(201); // 6 horas agora pode
+    } finally { await salvar(24, 4); }
+  });
+
+  it('só dá para reservar até hoje + o período definido (1 mês, 2 meses...)', async () => {
+    const amb = await novoAmbiente('Sala Período', [AUT]);
+    try {
+      const um = (await salvar(1, 4)).json();
+      expect(um.limite).toBe((await pool.query("SELECT ((now() AT TIME ZONE 'America/Recife')::date + interval '1 month')::date::text AS l")).rows[0].l);
+      expect((await reservarEm(amb, um.limite)).statusCode).toBe(201);        // o último dia ainda vale
+      const depois = await reservarEm(amb, somaDias(um.limite, 1));            // um dia depois, não
+      expect(depois.statusCode).toBe(400);
+      expect(depois.json().erro).toMatch(/Só é possível reservar até \d{2}\/\d{2}\/\d{4}/);
+
+      const dois = (await salvar(2, 4)).json();
+      expect(dois.limite > um.limite).toBe(true);
+      expect((await reservarEm(amb, somaDias(um.limite, 1))).statusCode).toBe(201); // com 2 meses passa a valer
+      expect((await reservarEm(amb, somaDias(dois.limite, 1))).statusCode).toBe(400);
+    } finally { await salvar(24, 4); }
+  });
+
+  it('horário ocupado pode ser cadastrado também para sábado e domingo', async () => {
+    const lab = await novoAmbiente('Lab Fim de Semana', [AUT]);
+    const sab = proximoSabado();
+    const url = `/api/ambientes/${lab}/bloqueios`;
+    const criado = await call(ADMIN, 'POST', url, { descricao: 'Curso aos sábados', dias_semana: [6, 7], hora_inicio: '08:00', hora_fim: '12:00', data_inicio: sab, data_fim: sab });
+    expect(criado.statusCode).toBe(201);
+    const r = await reservarEm(lab, sab, 9, 10);
+    expect(r.statusCode).toBe(409);
+    expect(r.json().erro).toMatch(/Curso aos sábados/);
+    expect((await reservarEm(lab, sab, 13, 14)).statusCode).toBe(201); // fora do horário ocupado
   });
 });
 

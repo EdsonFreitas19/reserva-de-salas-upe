@@ -1,5 +1,5 @@
-import { FormEvent, Fragment, useCallback, useEffect, useState } from 'react';
-import { Ambiente, api, fmtDataHora, Responsavel, Status } from '../api';
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Ambiente, api, fmtDataHora, fmtDia, RegrasReserva, Responsavel, Status } from '../api';
 import { Badge } from './MinhasReservas';
 import Ocupados from './Ocupados';
 import { useDesfazer } from '../App';
@@ -10,7 +10,7 @@ interface Res { id: number; ambiente_nome: string; solicitante_nome: string; ini
 const vazio = { nome: '', tipo: '', capacidade: '', localizacao: '' };
 
 export default function Admin() {
-  const [aba, setAba] = useState<'ambientes' | 'usuarios' | 'tipos' | 'reservas'>('ambientes');
+  const [aba, setAba] = useState<'ambientes' | 'usuarios' | 'tipos' | 'regras' | 'reservas'>('ambientes');
   return (
     <>
       <h1 className="page-title">Administração</h1>
@@ -18,14 +18,68 @@ export default function Admin() {
         <button className={aba === 'ambientes' ? 'tab active' : 'tab'} onClick={() => setAba('ambientes')}>Ambientes e autoridades</button>
         <button className={aba === 'usuarios' ? 'tab active' : 'tab'} onClick={() => setAba('usuarios')}>Usuários</button>
         <button className={aba === 'tipos' ? 'tab active' : 'tab'} onClick={() => setAba('tipos')}>Tipos de ambiente</button>
+        <button className={aba === 'regras' ? 'tab active' : 'tab'} onClick={() => setAba('regras')}>Regras de reserva</button>
         <button className={aba === 'reservas' ? 'tab active' : 'tab'} onClick={() => setAba('reservas')}>Todas as reservas</button>
       </div>
-      {aba === 'ambientes' ? <Ambientes /> : aba === 'usuarios' ? <Usuarios /> : aba === 'tipos' ? <Tipos /> : <Reservas />}
+      {aba === 'ambientes' ? <Ambientes /> : aba === 'usuarios' ? <Usuarios /> : aba === 'tipos' ? <Tipos /> : aba === 'regras' ? <RegrasReservaForm /> : <Reservas />}
     </>
   );
 }
 
-// RF12 + RF13 + horários ocupados
+/** Último dia reservável se hoje é `hoje` ('AAAA-MM-DD') e o período é de `meses` (mesma conta do servidor: dia 31 vira o fim do mês mais curto). */
+function limiteEm(hoje: string, meses: number): string {
+  const [a, m, d] = hoje.split('-').map(Number);
+  const alvo = new Date(Date.UTC(a, m - 1 + meses, 1));
+  const dias = new Date(Date.UTC(alvo.getUTCFullYear(), alvo.getUTCMonth() + 1, 0)).getUTCDate();
+  alvo.setUTCDate(Math.min(d, dias));
+  return alvo.toISOString().slice(0, 10);
+}
+
+// Período máximo de reserva (em meses) e duração máxima de cada reserva (em horas), definidos pelo administrador
+function RegrasReservaForm() {
+  const [atual, setAtual] = useState<RegrasReserva | null>(null);
+  const [f, setF] = useState({ meses: '1', horas: '4' });
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  useEffect(() => {
+    api<RegrasReserva>('/api/configuracao').then((c) => { setAtual(c); setF({ meses: String(c.periodo_max_meses), horas: String(c.duracao_max_horas) }); })
+      .catch((e) => setMsg({ tipo: 'err', texto: e.message }));
+  }, []);
+  const meses = Number(f.meses), horas = Number(f.horas);
+  const valido = Number.isInteger(meses) && meses >= 1 && meses <= 24 && Number.isInteger(horas) && horas >= 1 && horas <= 24;
+  const salvar = async (e: FormEvent) => {
+    e.preventDefault(); setMsg(null);
+    try {
+      const c = await api<RegrasReserva>('/api/configuracao', { method: 'PUT', body: { periodo_max_meses: meses, duracao_max_horas: horas } });
+      setAtual(c); setMsg({ tipo: 'ok', texto: `Salvo. Reservas liberadas até ${fmtDia(c.limite)}.` });
+    } catch (err) { setMsg({ tipo: 'err', texto: (err as Error).message }); }
+  };
+  if (!atual) return msg ? <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div> : <p className="muted">Carregando…</p>;
+  return (
+    <form className="card form" onSubmit={salvar}>
+      <h3>Regras de reserva</h3>
+      <p className="muted small">
+        Valem para todos os ambientes. Dias depois do limite não aparecem na agenda e o servidor recusa pedidos para eles.
+        Os horários ocupados (aulas) continuam podendo ser cadastrados para qualquer período.
+      </p>
+      <div className="row">
+        <label>Período máximo de reserva (meses à frente)
+          <input type="number" min={1} max={24} step={1} required value={f.meses} onChange={(e) => setF({ ...f, meses: e.target.value })} />
+        </label>
+        <label>Duração máxima de cada reserva (horas)
+          <input type="number" min={1} max={24} step={1} required value={f.horas} onChange={(e) => setF({ ...f, horas: e.target.value })} />
+        </label>
+      </div>
+      <p className="small">
+        Hoje é <b>{fmtDia(atual.hoje)}</b>. {valido
+          ? <>Com {meses} {meses === 1 ? 'mês' : 'meses'}, dá para reservar até <b>{fmtDia(limiteEm(atual.hoje, meses))}</b>, com até {horas} {horas === 1 ? 'hora' : 'horas'} por reserva.</>
+          : <>Informe números inteiros: de 1 a 24 meses e de 1 a 24 horas.</>}
+      </p>
+      {msg && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
+      <div className="actions"><button className="btn btn-primary" disabled={!valido}>Salvar</button></div>
+    </form>
+  );
+}
+
 // RF12 + RF13 + horários ocupados
 
 function Ambientes() {
@@ -34,6 +88,8 @@ function Ambientes() {
   const [avisoMapa, setAvisoMapa] = useState('');
   useEffect(() => { api<Tipo[]>('/api/tipos').then(setTipos); }, []);
   const [lista, setLista] = useState<Ambiente[]>([]);
+  const [fSituacao, setFSituacao] = useState<'todas' | 'ativas' | 'inativas'>('todas');
+  const [fResp, setFResp] = useState<'todos' | 'com' | 'sem'>('todos');
   const [f, setF] = useState(vazio);
   const [edit, setEdit] = useState<number | null>(null);
   const [msg, setMsg] = useState('');
@@ -41,6 +97,11 @@ function Ambientes() {
   const [aberto, setAberto] = useState<number | null>(null); // ambiente com o painel de gestão aberto
 
   const carregar = useCallback(() => { api<Ambiente[]>('/api/ambientes?todos=1').then(setLista); }, []);
+  // Filtros da lista: situação (ativa/inativa) e responsável (com/sem) se combinam
+  const filtrada = useMemo(() => lista.filter((a) =>
+    (fSituacao === 'todas' || (fSituacao === 'ativas') === a.ativo) &&
+    (fResp === 'todos' || (fResp === 'com') === (a.autoridades.length > 0))), [lista, fSituacao, fResp]);
+  const filtrando = fSituacao !== 'todas' || fResp !== 'todos';
   useEffect(carregar, [carregar]);
 
   const corpo = () => ({
@@ -96,11 +157,26 @@ function Ambientes() {
 
       {avisoMapa && <div className="alert alert-ok">{avisoMapa}</div>}
       {erroLista && <div className="alert alert-err">{erroLista}</div>}
+      <div className="filtros">
+        <label>Situação
+          <select value={fSituacao} onChange={(e) => setFSituacao(e.target.value as typeof fSituacao)}>
+            <option value="todas">Todas</option><option value="ativas">Ativas</option><option value="inativas">Inativas</option>
+          </select>
+        </label>
+        <label>Responsável
+          <select value={fResp} onChange={(e) => setFResp(e.target.value as typeof fResp)}>
+            <option value="todos">Todos</option><option value="com">Com responsável</option><option value="sem">Sem responsável</option>
+          </select>
+        </label>
+        {filtrando && <button type="button" className="btn btn-outline" onClick={() => { setFSituacao('todas'); setFResp('todos'); }}>Limpar filtros</button>}
+        <span className="muted small">{filtrando ? `${filtrada.length} de ${lista.length} ambientes` : `${lista.length} ambientes`}</span>
+      </div>
       <div className="table-wrap">
         <table>
           <thead><tr><th>Ambiente</th><th>Tipo</th><th>Responsáveis (qualquer um aprova)</th><th>Situação</th><th /></tr></thead>
           <tbody>
-            {lista.map((a) => (
+            {lista.length > 0 && filtrada.length === 0 && <tr><td colSpan={5} className="muted">Nenhum ambiente com esses filtros.</td></tr>}
+            {filtrada.map((a) => (
               <Fragment key={a.id}>
                 <tr className={a.ativo ? '' : 'inativo'}>
                   <td><b>{a.nome}</b><br /><span className="muted small">{a.localizacao}</span></td>

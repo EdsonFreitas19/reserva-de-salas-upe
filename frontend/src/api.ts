@@ -37,6 +37,10 @@ export interface Ambiente {
   ativo: boolean; autoridades: Responsavel[]; // pode haver vários responsáveis; basta um aprovar
 }
 
+/** Regras de reserva definidas pelo administrador. `hoje` e `limite` são datas 'AAAA-MM-DD' no horário de Recife. */
+export interface RegrasReserva { periodo_max_meses: number; duracao_max_horas: number; hoje: string; limite: string }
+export const fmtDia = (d: string) => d.split('-').reverse().join('/');
+
 export const fmtDataHora = (d: string) =>
   new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 export const fmtHora = (d: string) => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });

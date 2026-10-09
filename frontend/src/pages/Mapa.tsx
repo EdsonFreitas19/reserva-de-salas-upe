@@ -1,5 +1,6 @@
 import { PointerEvent as RPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import ListaSalas from '../components/ListaSalas';
 import TipoSelect from '../components/TipoSelect';
 import { Ambiente, api, MapaArea, MapaDados } from '../api';
 import { useMe } from '../App';
@@ -192,7 +193,7 @@ export default function Mapa() {
 
   const clicarArea = (a: MapaArea) => {
     if (edit) { if (!modoNova) setSel(a.id); return; }
-    if (a.ambiente_id && (a.ambiente_ativo || admin)) nav(`/ambientes/${a.ambiente_id}`);
+    if (a.ambiente_id && a.ambiente_ativo) nav(`/ambientes/${a.ambiente_id}`);
   };
 
   // ---------- ações do administrador ----------
@@ -238,7 +239,7 @@ export default function Mapa() {
   return (
     <>
       <div className="card-head">
-        <h1 className="page-title">Mapa do campus</h1>
+        <h1 className="page-title">Reserva de ambientes</h1>
         {admin && (
           <div className="inline-form">
             {edit && <>
@@ -254,7 +255,7 @@ export default function Mapa() {
       <p className="muted small">
         {edit
           ? (modoNova ? 'Arraste sobre o mapa para desenhar a nova área.' : 'Clique numa área para editar; arraste para mover e use os pontos azuis para mudar o tamanho. Nada vale até clicar em “Salvar alterações”; Ctrl+Z desfaz.')
-          : 'Clique numa sala para ver as fotos, a agenda e solicitar uma reserva.'}
+          : 'Clique numa sala do mapa ou escolha uma na lista abaixo para ver a agenda e solicitar a reserva.'}
       </p>
       {msg && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
 
@@ -271,17 +272,18 @@ export default function Mapa() {
               onPointerDown={(e) => { if (edit && modoNova) { capturar(e); const [x, y] = ponto(e); arraste.current = { tipo: 'nova', x, y, chave: novaChave() }; } else if (edit) setSel(null); }} />
             {areas.map((a) => {
               const c = rotulos.get(a.id)!;
-              const clicavel = !edit && !!a.ambiente_id && (!!a.ambiente_ativo || admin);
+              const clicavel = !edit && !!a.ambiente_id && !!a.ambiente_ativo; // só ambiente ativo abre a agenda
               const nome = (a.ambiente_id ? a.ambiente_nome : null) ?? a.rotulo;
               const linhas = quebrar(nome, Math.max(4, Math.floor((2 * c.folga - 4) / 6.2)));
               const y0 = c.y - ((linhas.length * 12 + 15) / 2) + 12;
-              const ativoHover = passando === a.id || destaque === a.ambiente_id && !!destaque;
+              // Só destaca ao passar o mouse quem é clicável (ou, no editor, qualquer área, para poder selecioná-la)
+              const ativoHover = (passando === a.id && (clicavel || edit)) || (destaque === a.ambiente_id && !!destaque);
               return (
                 <g key={a.id} className={`area${clicavel ? ' clicavel' : ''}${a.id === sel ? ' sel' : ''}${ativoHover ? ' hover' : ''}${destaque && destaque === a.ambiente_id ? ' pulsa' : ''}`}
                   onPointerEnter={() => setPassando(a.id)} onPointerLeave={() => setPassando(null)}
                   onClick={() => clicarArea(a)} tabIndex={clicavel ? 0 : undefined} role={clicavel ? 'link' : undefined}
                   onKeyDown={(e) => { if (e.key === 'Enter') clicarArea(a); }}>
-                  <title>{a.ambiente_id ? `${nome} — ${a.tipo}${a.fotos ? ` · ${a.fotos} foto(s)` : ''}` : `${nome} — ainda sem ambiente cadastrado`}</title>
+                  <title>{!a.ambiente_id ? `${nome} — ainda sem ambiente cadastrado` : !a.ambiente_ativo && !edit ? `${nome} — indisponível para reserva` : `${nome} — ${a.tipo}${a.fotos ? ` · ${a.fotos} foto(s)` : ''}`}</title>
                   <polygon points={a.pontos.map((p) => p.join(',')).join(' ')} fill={!semCor(a) ? corDe(a.tipo) : 'url(#sem-vinculo)'}
                     onPointerDown={(e) => {
                       if (!edit) return;
@@ -357,6 +359,9 @@ export default function Mapa() {
           </aside>
         )}
       </div>
+
+      {/* Salas para reservar (some no editor do mapa, para não poluir) */}
+      {!edit && <ListaSalas cores={cores} onPassar={(id) => setPassando(id ? areas.find((a) => a.ambiente_id === id)?.id ?? null : null)} />}
     </>
   );
 }

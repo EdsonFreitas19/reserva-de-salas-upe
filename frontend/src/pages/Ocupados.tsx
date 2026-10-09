@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useDesfazer } from '../App';
 
 interface Regra { id: number; descricao: string; dias_semana: number[]; hora_inicio: string; hora_fim: string; data_inicio: string; data_fim: string }
-const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'];
+const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const fmtData = (d: string) => d.split('-').reverse().join('/');
 const vazioBloq = { descricao: '', dias: [1, 2, 3, 4, 5] as number[], hora_inicio: '08:00', hora_fim: '10:00', data_inicio: '', data_fim: '' };
 

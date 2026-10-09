@@ -1,13 +1,12 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Fotos from '../components/Fotos';
-import { Ambiente, api, fmtHora, rotuloStatus, Status } from '../api';
+import { Ambiente, api, fmtDia, fmtHora, RegrasReserva, rotuloStatus, Status } from '../api';
 
 interface Item { id: number; inicio: string; fim: string; status: Status; finalidade: string; solicitante_nome: string }
 interface Ocupado { id: number; inicio: string; fim: string; descricao: string }
 interface Bloco { chave: string; inicio: string; fim: string; classe: string; titulo: string; detalhe: string; dica: string }
 
-const DURACAO_MAXIMA_H = 4; // igual ao limite do servidor
 const segunda = (d: Date) => {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
@@ -15,7 +14,6 @@ const segunda = (d: Date) => {
 };
 const soma = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const proximoDiaUtil = (d: Date) => { const x = new Date(d); while (x.getDay() === 0 || x.getDay() === 6) x.setDate(x.getDate() + 1); return x; };
 const minutos = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
 // RF04 (agenda da semana: reservas + horários ocupados) + RF05 (solicitar reserva)
@@ -26,8 +24,12 @@ export default function AmbienteAgenda() {
   const [reservas, setReservas] = useState<Item[]>([]);
   const [ocupados, setOcupados] = useState<Ocupado[]>([]);
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
-  const [f, setF] = useState(() => ({ data: ymd(proximoDiaUtil(new Date())), ini: '08:00', fim: '10:00', finalidade: '' }));
+  const [cfg, setCfg] = useState<RegrasReserva | null>(null); // limites definidos pelo administrador
+  const [f, setF] = useState({ data: '', ini: '08:00', fim: '10:00', finalidade: '' });
   const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => { api<RegrasReserva>('/api/configuracao').then(setCfg).catch((e) => setMsg({ tipo: 'err', texto: e.message })); }, []);
+  useEffect(() => { if (cfg) setF((x) => (x.data ? x : { ...x, data: cfg.hoje })); }, [cfg]); // começa em hoje (horário de Recife)
 
   useEffect(() => { api<Ambiente[]>('/api/ambientes').then((l) => setAmb(l.find((a) => a.id === Number(id)) ?? null)); }, [id]);
 
@@ -39,7 +41,11 @@ export default function AmbienteAgenda() {
   }, [id, semana]);
   useEffect(carregar, [carregar]);
 
-  const dias = useMemo(() => Array.from({ length: 5 }, (_, i) => soma(semana, i)), [semana]); // só segunda a sexta
+  // Segunda a domingo; dias depois do limite definido pelo administrador nem aparecem
+  const dias = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => soma(semana, i)).filter((d) => !cfg || ymd(d) <= cfg.limite),
+    [semana, cfg]);
+  const podeAvancar = !cfg || ymd(soma(semana, 7)) <= cfg.limite;
 
   const blocos: Bloco[] = useMemo(() => [
     ...reservas.map((i): Bloco => ({
@@ -53,11 +59,11 @@ export default function AmbienteAgenda() {
   ].sort((a, b) => a.inicio.localeCompare(b.inicio)), [reservas, ocupados]);
 
   // Avisos antes de enviar (o servidor valida de novo)
-  const dow = new Date(`${f.data}T12:00`).getDay();
   const duracao = minutos(f.fim) - minutos(f.ini);
-  const aviso = dow === 0 || dow === 6 ? 'Reservas só podem ser feitas de segunda a sexta-feira.'
+  const maxH = cfg?.duracao_max_horas ?? 4;
+  const aviso = cfg && f.data > cfg.limite ? `Só é possível reservar até ${fmtDia(cfg.limite)}.`
     : duracao <= 0 ? 'O horário final deve ser depois do inicial.'
-    : duracao > DURACAO_MAXIMA_H * 60 ? `A duração máxima é de ${DURACAO_MAXIMA_H} horas.` : '';
+    : duracao > maxH * 60 ? `A duração máxima é de ${maxH} ${maxH === 1 ? 'hora' : 'horas'}.` : '';
 
   const enviar = async (e: FormEvent) => {
     e.preventDefault();
@@ -81,10 +87,10 @@ export default function AmbienteAgenda() {
 
   return (
     <>
-      <p><Link to="/">← Ambientes</Link></p>
+      <p><Link to="/">← Voltar para a reserva</Link></p>
       <h1 className="page-title">{amb.nome}</h1>
       <p className="muted">{amb.tipo}{amb.localizacao ? ` · ${amb.localizacao}` : ''}{amb.capacidade ? ` · até ${amb.capacidade} pessoas` : ''}</p>
-      <p className="small"><Link to={`/mapa?sala=${amb.id}`}>📍 Ver no mapa</Link></p>
+      <p className="small"><Link to={`/?sala=${amb.id}`}>📍 Ver no mapa</Link> · <Link to={`/informacoes?sala=${amb.id}`}>ℹ Informações da sala</Link></p>
       <Fotos ambienteId={amb.id} />
       {semResponsavel
         ? <div className="alert alert-warn">Este ambiente ainda não tem um responsável para aprovar reservas, então ainda não é possível solicitar. Fale com o administrador.</div>
@@ -94,10 +100,10 @@ export default function AmbienteAgenda() {
         <section>
           <div className="week-nav">
             <button className="btn btn-outline" onClick={() => setSemana(soma(semana, -7))}>‹ Anterior</button>
-            <strong>{semana.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} – {soma(semana, 4).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>
-            <button className="btn btn-outline" onClick={() => setSemana(soma(semana, 7))}>Próxima ›</button>
+            <strong>{semana.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} – {(dias[dias.length - 1] ?? soma(semana, 6)).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>
+            <button className="btn btn-outline" disabled={!podeAvancar} onClick={() => setSemana(soma(semana, 7))}>Próxima ›</button>
           </div>
-          <div className="week">
+          <div className="week" style={{ ['--n' as string]: dias.length }}>
             {dias.map((d) => {
               const doDia = blocos.filter((b) => ymd(new Date(b.inicio)) === ymd(d));
               return (
@@ -126,9 +132,12 @@ export default function AmbienteAgenda() {
 
         <section className="card">
           <h3>Solicitar reserva</h3>
-          <p className="muted small">De segunda a sexta, no mesmo dia, com no máximo {DURACAO_MAXIMA_H} horas. Fora dos horários marcados como ocupados.</p>
+          <p className="muted small">
+            Qualquer dia da semana, no mesmo dia, com no máximo {maxH} {maxH === 1 ? 'hora' : 'horas'}
+            {cfg ? <>, até <b>{fmtDia(cfg.limite)}</b></> : null}. Fora dos horários marcados como ocupados.
+          </p>
           <form onSubmit={enviar} className="form">
-            <label>Data<input type="date" required value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></label>
+            <label>Data<input type="date" required value={f.data} min={cfg?.hoje} max={cfg?.limite} onChange={(e) => setF({ ...f, data: e.target.value })} /></label>
             <div className="row">
               <label>Início<input type="time" required value={f.ini} onChange={(e) => setF({ ...f, ini: e.target.value })} /></label>
               <label>Fim<input type="time" required value={f.fim} onChange={(e) => setF({ ...f, fim: e.target.value })} /></label>

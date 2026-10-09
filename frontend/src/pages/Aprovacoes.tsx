@@ -22,9 +22,10 @@ type Aba = 'pendentes' | 'aprovadas' | 'salas' | 'usuarios';
  */
 export default function Aprovacoes() {
   const { me } = useMe();
+  const admin = me.papeis.includes('ADMIN');
   const [aba, setAba] = useState<Aba>('pendentes');
 
-  if (me.responsavelPor.length === 0)
+  if (me.responsavelPor.length === 0 && !admin)
     return (
       <>
         <h1 className="page-title">Aprovações</h1>
@@ -38,19 +39,25 @@ export default function Aprovacoes() {
       </>
     );
 
+  // O administrador decide em todos os ambientes (sem ser listado como responsável); a aba "Minhas salas" é só de responsável
+  // (a lista de usuários e a gestão de salas do administrador ficam na tela "Administração")
+  const abas: [Aba, string][] = [['pendentes', 'Solicitações pendentes'], ['aprovadas', 'Reservas aprovadas'],
+    ...(admin ? [] : [['salas', 'Minhas salas'], ['usuarios', 'Usuários']] as [Aba, string][])];
   return (
     <>
       <h1 className="page-title">Aprovações</h1>
-      <p className="muted small">Você é responsável por: <b>{me.responsavelPor.map((a) => a.nome).join(', ')}</b></p>
+      {admin
+        ? <p className="muted small">Como administrador, você pode aprovar, recusar e cancelar reservas de <b>todos os ambientes</b>.</p>
+        : <p className="muted small">Você é responsável por: <b>{me.responsavelPor.map((a) => a.nome).join(', ')}</b></p>}
       <div className="tabs">
-        {([['pendentes', 'Solicitações pendentes'], ['aprovadas', 'Reservas aprovadas'], ['salas', 'Minhas salas'], ['usuarios', 'Usuários']] as [Aba, string][]).map(([k, t]) => (
+        {abas.map(([k, t]) => (
           <button key={k} className={aba === k ? 'tab active' : 'tab'} onClick={() => setAba(k)}>{t}</button>
         ))}
       </div>
       {aba === 'pendentes' && <Pendentes />}
       {aba === 'aprovadas' && <Aprovadas />}
-      {aba === 'salas' && <MinhasSalas />}
-      {aba === 'usuarios' && <Usuarios />}
+      {aba === 'salas' && !admin && <MinhasSalas />}
+      {aba === 'usuarios' && !admin && <Usuarios />}
     </>
   );
 }
@@ -79,7 +86,7 @@ function Pendentes() {
         solicitações pendentes do mesmo ambiente e horário são recusadas automaticamente, e cada solicitante é avisado.
       </p>
       {msg && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
-      {pend?.length === 0 && <p className="muted">Nenhuma solicitação pendente.</p>}
+      {pend?.length === 0 && <p className="muted">Nenhuma solicitação pendente. 🎉</p>}
       <div className="stack">
         {pend?.map((r) => (
           <div className="card" key={r.id}>
@@ -142,7 +149,7 @@ function Aprovadas() {
     <>
       <p className="muted">Você pode cancelar uma reserva aprovada até o momento em que ela começar. O solicitante recebe uma notificação com o motivo.</p>
       {msg && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
-      {aprov?.length === 0 && <p className="muted">Nenhuma reserva aprovada por vir nos seus ambientes.</p>}
+      {aprov?.length === 0 && <p className="muted">Nenhuma reserva aprovada por vir.</p>}
       <div className="stack">
         {aprov?.map((r) => (
           <div className="card" key={r.id}>

@@ -30,7 +30,7 @@ const dataValida = (msg: string) =>
 
 const bloqueioBody = z.object({
   descricao: z.string().trim().min(1, 'Informe uma descrição (ex.: Aula de Banco de Dados)').max(150),
-  dias_semana: z.array(z.number().int().min(1, 'Só dias de semana (segunda a sexta)').max(5, 'Só dias de semana (segunda a sexta)'))
+  dias_semana: z.array(z.number().int().min(1, 'Dia da semana inválido').max(7, 'Dia da semana inválido'))
     .min(1, 'Escolha ao menos um dia da semana'),
   hora_inicio: hhmm('Horário inicial inválido'),
   hora_fim: hhmm('Horário final inválido'),

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { api, Me } from './api';
 import Login from './pages/Login';
-import Ambientes from './pages/Ambientes';
+import Informacoes from './pages/Informacoes';
 import AmbienteAgenda from './pages/AmbienteAgenda';
 import MinhasReservas from './pages/MinhasReservas';
 import Aprovacoes from './pages/Aprovacoes';
@@ -85,18 +85,19 @@ export default function App() {
         <div className="container navbar-in">
           <img src="/logo-upe.png" alt="UPE — Universidade de Pernambuco, Campus Caruaru" className="logo" />
           <nav>
-            <NavLink to="/" end>Ambientes</NavLink>
-            <NavLink to="/mapa">Mapa</NavLink>
+            <NavLink to="/" end>Reserva</NavLink>
             <NavLink to="/minhas">Minhas reservas</NavLink>
             <NavLink to="/aprovacoes">Aprovações</NavLink>
             {me.papeis.includes('ADMIN') && <NavLink to="/admin">Administração</NavLink>}
+            <NavLink to="/informacoes">Informações</NavLink>
           </nav>
         </div>
       </header>
       <main className="container">
         <Routes>
-          <Route path="/" element={<Ambientes />} />
-          <Route path="/mapa" element={<Mapa />} />
+          <Route path="/" element={<Mapa />} />
+          <Route path="/mapa" element={<Navigate to={`/${loc.search}`} replace />} />
+          <Route path="/informacoes" element={<Informacoes />} />
           <Route path="/ambientes/:id" element={<AmbienteAgenda />} />
           <Route path="/minhas" element={<MinhasReservas />} />
           <Route path="/aprovacoes" element={<Aprovacoes />} />
