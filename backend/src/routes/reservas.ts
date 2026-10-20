@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { isExclusionViolation, pool, tx } from '../db.js';
+import { enviarEmailsDasNotificacoes } from '../email.js';
 import { isAdmin, podeDecidir, requireAdmin, requireAuth } from '../auth.js';
 import { regras } from '../config.js';
 import { lerRegrasReserva } from './configuracao.js';
@@ -20,8 +21,18 @@ async function registrarHistorico(
     [reservaId, anterior, novo, autorId, motivo ?? null],
   );
 }
+// Notificações criadas dentro de cada transação: os e-mails só saem depois que ela for confirmada (commit)
+const notificacoesDaTx = new WeakMap<PoolClient, number[]>();
 async function notificar(c: PoolClient, usuarioId: number, reservaId: number, mensagem: string) {
-  await c.query('INSERT INTO notificacao (usuario_id, reserva_id, mensagem) VALUES ($1,$2,$3)', [usuarioId, reservaId, mensagem]);
+  const r = await c.query('INSERT INTO notificacao (usuario_id, reserva_id, mensagem) VALUES ($1,$2,$3) RETURNING id', [usuarioId, reservaId, mensagem]);
+  notificacoesDaTx.get(c)?.push(r.rows[0].id);
+}
+/** Igual a tx(), mas depois do commit manda por e-mail as notificações criadas (se o envio estiver configurado). */
+async function txComEmail<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
+  const ids: number[] = [];
+  const out = await tx(async (c) => { notificacoesDaTx.set(c, ids); return fn(c); });
+  enviarEmailsDasNotificacoes(ids);
+  return out;
 }
 
 export async function reservaRoutes(app: FastifyInstance) {
@@ -72,7 +83,7 @@ export async function reservaRoutes(app: FastifyInstance) {
     );
     if (conflito.rowCount) throw new HttpError(409, 'Já existe uma reserva aprovada nesse horário');
 
-    const id = await tx(async (c) => {
+    const id = await txComEmail(async (c) => {
       // criado_em vem do DEFAULT now() do banco (RN09) — nunca do cliente
       const r = await c.query(
         `INSERT INTO reserva (ambiente_id, solicitante_id, inicio, fim, finalidade) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
@@ -97,10 +108,22 @@ export async function reservaRoutes(app: FastifyInstance) {
               (r.cancelado_por_id IS NOT NULL AND r.cancelado_por_id <> r.solicitante_id) AS cancelada_pela_autoridade
          FROM reserva r LEFT JOIN ambiente a ON a.id = r.ambiente_id
          LEFT JOIN usuario cu ON cu.id = r.cancelado_por_id
-        WHERE r.solicitante_id = $1 ORDER BY r.inicio DESC`,
+        WHERE r.solicitante_id = $1 AND NOT r.oculta_solicitante ORDER BY r.inicio DESC`,
       [req.auth.id],
     );
     return rows;
+  });
+
+  // Tira da lista "Minhas reservas" uma reserva que já acabou (ou foi recusada/cancelada). Não apaga o histórico da autoridade.
+  app.delete('/api/reservas/:id', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const r = await pool.query('SELECT solicitante_id, status, fim FROM reserva WHERE id = $1', [id]);
+    const res = r.rows[0];
+    if (!res || res.solicitante_id !== req.auth.id) throw new HttpError(404, 'Reserva não encontrada');
+    const encerrada = ['RECUSADA', 'CANCELADA'].includes(res.status) || new Date(res.fim) <= new Date();
+    if (!encerrada) throw new HttpError(409, 'Só é possível excluir reservas que já passaram, foram recusadas ou canceladas');
+    await pool.query('UPDATE reserva SET oculta_solicitante = true WHERE id = $1', [id]);
+    return { ok: true };
   });
 
   app.get('/api/reservas/:id/historico', async (req) => {
@@ -121,7 +144,7 @@ export async function reservaRoutes(app: FastifyInstance) {
   // RF09
   app.post('/api/reservas/:id/cancelar', async (req) => {
     const { id } = idParam.parse(req.params);
-    await tx(async (c) => {
+    await txComEmail(async (c) => {
       const r = await c.query(
         `SELECT r.* FROM reserva r WHERE r.id = $1 FOR UPDATE OF r`, [id]);
       const res = r.rows[0];
@@ -161,7 +184,7 @@ export async function reservaRoutes(app: FastifyInstance) {
     const { motivo } = z.object({
       motivo: z.string().trim().min(3, 'Informe o motivo do cancelamento').max(300),
     }).parse(req.body);
-    await tx(async (c) => {
+    await txComEmail(async (c) => {
       const r = await c.query(
         `SELECT r.* FROM reserva r WHERE r.id = $1 FOR UPDATE OF r`, [id]);
       const res = r.rows[0];
@@ -206,7 +229,7 @@ export async function reservaRoutes(app: FastifyInstance) {
   app.post('/api/reservas/:id/aprovar', async (req) => {
     const { id } = idParam.parse(req.params);
     try {
-      await tx(async (c) => {
+      await txComEmail(async (c) => {
         // Uma aprovação por vez em cada ambiente: evita corrida entre dois responsáveis e deadlock
         // entre as recusas automáticas. (A constraint do banco continua sendo a garantia final.)
         const pre = await c.query('SELECT ambiente_id FROM reserva WHERE id = $1', [id]);
@@ -253,7 +276,7 @@ export async function reservaRoutes(app: FastifyInstance) {
     const { justificativa } = z.object({
       justificativa: z.string().trim().min(3, 'A justificativa é obrigatória').max(300), // RN07
     }).parse(req.body);
-    await tx(async (c) => {
+    await txComEmail(async (c) => {
       const r = await c.query(
         `SELECT r.* FROM reserva r WHERE r.id = $1 FOR UPDATE OF r`, [id]);
       const res = r.rows[0];

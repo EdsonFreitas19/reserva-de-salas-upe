@@ -18,6 +18,17 @@ export const config = {
   authorizedEmailsFile: resolve(backendRoot, process.env.AUTHORIZED_EMAILS_FILE ?? 'emails-autorizados.txt'),
   /** Pasta das fotos dos ambientes (relativa a backend/). */
   uploadsDir: resolve(backendRoot, process.env.UPLOADS_DIR ?? 'uploads'),
+  /** Link do sistema que vai nos e-mails (ex.: https://reserva.upe.br). Opcional. */
+  appUrl: (process.env.APP_URL ?? '').replace(/\/+$/, ''),
+  /** Envio de e-mails (opcional): só liga se SMTP_HOST estiver preenchido. */
+  smtp: {
+    host: process.env.SMTP_HOST ?? '',
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from: process.env.SMTP_FROM ?? 'Reserva de Ambientes UPE <nao-responda@upe.br>',
+  },
   devLogin: process.env.DEV_LOGIN === 'true',
   isProd: process.env.NODE_ENV === 'production',
 };

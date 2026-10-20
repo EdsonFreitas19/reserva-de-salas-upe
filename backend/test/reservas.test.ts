@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { migrate } from '../src/migrate.js';
 import { pool } from '../src/db.js';
+import nodemailer from 'nodemailer';
+import { aguardarEmails, usarTransporteDeTeste } from '../src/email.js';
 
 const app = buildApp();
 const ADMIN = 'admin@teste.local', AUT = 'aut@teste.local', AUT2 = 'aut2@teste.local', OUTRA = 'outra@teste.local';
@@ -529,5 +531,75 @@ describe('área do responsável: horários ocupados e diretório de usuários', 
     expect(linhaAut.responsavel_por).toContain('Sala Teste');
     expect((await call(ADMIN, 'GET', '/api/usuarios/diretorio')).statusCode).toBe(200);
     await call(B, 'POST', `/api/reservas/${sol.json().id}/cancelar`);
+  });
+});
+
+describe('e-mails de aviso', () => {
+  const enviados: { to: string; subject: string; text: string }[] = [];
+  beforeAll(() => {
+    const t = nodemailer.createTransport({ jsonTransport: true });
+    const original = t.sendMail.bind(t);
+    (t as unknown as { sendMail: unknown }).sendMail = async (m: { to: string; subject: string; text: string }) => { enviados.push(m); return original(m as never); };
+    usarTransporteDeTeste(t);
+  });
+  const paraQuem = (email: string) => enviados.filter((m) => m.to === email);
+
+  it('solicitação nova: e-mail para todos os responsáveis da sala (e para ninguém mais)', async () => {
+    enviados.length = 0;
+    const r = await pedir(A, 50, 9, 10, 'Teste de e-mail');
+    expect(r.statusCode).toBe(201);
+    await aguardarEmails();
+    expect(paraQuem(AUT)).toHaveLength(1);
+    expect(paraQuem(AUT2)).toHaveLength(1);
+    expect(paraQuem(A)).toHaveLength(0);
+    expect(paraQuem(OUTRA)).toHaveLength(0);
+    expect(paraQuem(AUT)[0].subject).toMatch(/Nova solicitação/);
+    // aprovar: e-mail para o solicitante
+    enviados.length = 0;
+    expect((await aprovar(AUT, r.json().id)).statusCode).toBe(200);
+    await aguardarEmails();
+    expect(paraQuem(A)).toHaveLength(1);
+    expect(paraQuem(A)[0].text).toMatch(/APROVADA/);
+  });
+
+  it('recusa: e-mail para o solicitante com a justificativa', async () => {
+    const r = await pedir(B, 51, 9, 10, 'Teste recusa e-mail');
+    await aguardarEmails();
+    enviados.length = 0;
+    expect((await call(AUT, 'POST', `/api/reservas/${r.json().id}/recusar`, { justificativa: 'Sala em manutenção' })).statusCode).toBe(200);
+    await aguardarEmails();
+    expect(paraQuem(B)).toHaveLength(1);
+    expect(paraQuem(B)[0].text).toMatch(/RECUSADA.*Sala em manutenção/);
+  });
+
+  it('pedido rejeitado (erro de validação) não envia e-mail nenhum', async () => {
+    enviados.length = 0;
+    expect((await pedir(A, 52, 12, 10)).statusCode).toBe(400);
+    await aguardarEmails();
+    expect(enviados).toHaveLength(0);
+  });
+});
+
+describe('excluir da lista', () => {
+  it('reserva recusada some só de "Minhas reservas"; ativa não pode ser excluída; de outro usuário também não', async () => {
+    const r = await pedir(A, 60, 9, 10, 'Para excluir');
+    const id = r.json().id as number;
+    expect((await call(A, 'DELETE', `/api/reservas/${id}`)).statusCode).toBe(409); // pendente e futura
+    expect((await call(AUT, 'POST', `/api/reservas/${id}/recusar`, { justificativa: 'Não dá' })).statusCode).toBe(200);
+    expect((await call(B, 'DELETE', `/api/reservas/${id}`)).statusCode).toBe(404);  // não é dele
+    expect((await call(A, 'DELETE', `/api/reservas/${id}`)).statusCode).toBe(200);
+    const minhas = (await call(A, 'GET', '/api/reservas/minhas')).json() as { id: number }[];
+    expect(minhas.some((x) => x.id === id)).toBe(false);
+    expect((await pool.query('SELECT 1 FROM reserva WHERE id = $1', [id])).rowCount).toBe(1); // continua no banco
+    expect((await call(AUT, 'GET', `/api/reservas/${id}/historico`)).statusCode).toBe(200);   // autoridade ainda vê o histórico
+  });
+
+  it('notificação: exclui só a própria', async () => {
+    const lista = (await call(AUT, 'GET', '/api/notificacoes')).json() as { id: number }[];
+    expect(lista.length).toBeGreaterThan(0);
+    await call(B, 'DELETE', `/api/notificacoes/${lista[0].id}`); // outro usuário: não faz nada
+    expect(((await call(AUT, 'GET', '/api/notificacoes')).json() as unknown[]).length).toBe(lista.length);
+    expect((await call(AUT, 'DELETE', `/api/notificacoes/${lista[0].id}`)).statusCode).toBe(200);
+    expect(((await call(AUT, 'GET', '/api/notificacoes')).json() as unknown[]).length).toBe(lista.length - 1);
   });
 });

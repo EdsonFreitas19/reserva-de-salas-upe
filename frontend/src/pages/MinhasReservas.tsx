@@ -8,6 +8,12 @@ interface Reserva {
 }
 interface Hist { status_anterior: Status | null; status_novo: Status; autor_nome: string; motivo: string | null; criado_em: string }
 
+export const IconeLixeira = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+  </svg>
+);
+
 export const Badge = ({ s }: { s: Status }) => <span className={`badge badge-${s.toLowerCase()}`}>{rotuloStatus[s]}</span>;
 
 // RF08 + RF09
@@ -21,6 +27,10 @@ export default function MinhasReservas() {
   const cancelar = async (id: number) => {
     if (!confirm('Cancelar esta reserva?')) return;
     try { await api(`/api/reservas/${id}/cancelar`, { body: {} }); carregar(); } catch (e) { setErro((e as Error).message); }
+  };
+  const excluir = async (id: number) => {
+    if (!confirm('Excluir esta reserva da sua lista? Essa ação não pode ser desfeita.')) return;
+    try { await api(`/api/reservas/${id}`, { method: 'DELETE' }); carregar(); } catch (e) { setErro((e as Error).message); }
   };
   const alternarHist = async (id: number) => {
     if (hist[id]) return setHist({ ...hist, [id]: null });
@@ -37,7 +47,12 @@ export default function MinhasReservas() {
           <div className="card" key={r.id}>
             <div className="card-head">
               <h3>{r.ambiente_nome}</h3>
-              <Badge s={r.status} />
+              <span className="head-right">
+                <Badge s={r.status} />
+                {(['RECUSADA', 'CANCELADA'].includes(r.status) || new Date(r.fim) <= new Date()) && (
+                  <button className="trash" title="Excluir da minha lista" aria-label="Excluir da minha lista" onClick={() => excluir(r.id)}><IconeLixeira /></button>
+                )}
+              </span>
             </div>
             <p><b>{fmtDataHora(r.inicio)}</b> até <b>{fmtDataHora(r.fim)}</b></p>
             <p className="muted">{r.finalidade}</p>

@@ -19,5 +19,6 @@ app.listen({ port: config.port, host: '0.0.0.0' }).then(() => {
   console.log(`API rodando em http://localhost:${config.port}`);
   if (config.devLogin) console.log('⚠  DEV_LOGIN ativo (login de teste sem Google).');
   console.log(`✔ Podem entrar: e-mails @${config.allowedDomains.join(', @')}, administradores (${config.adminEmails.join(', ') || 'nenhum'}) e ${emailsAutorizados().size} exceção(ões) em ${config.authorizedEmailsFile}`);
+  console.log(config.smtp.host ? `✉  E-mails ligados (${config.smtp.user || 'sem usuário'} via ${config.smtp.host}:${config.smtp.port}).` : 'ℹ  E-mails desligados (SMTP_HOST vazio no .env).');
   if (!config.googleClientId) console.log('ℹ  GOOGLE_CLIENT_ID vazio: só o login de desenvolvimento funciona.');
 });

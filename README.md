@@ -189,3 +189,9 @@ Reservas recorrentes, anexos, relatórios exportáveis, múltiplas autoridades p
 - **"autenticação do tipo senha falhou" no seed:** o projeto está falando com outro PostgreSQL. Confira se `DATABASE_URL` usa a porta **5433** (a do Docker), não a 5432.
 - **Tela de login diz "back-end está rodando?":** a API (porta 3001) não subiu; veja o log no terminal.
 - **Login Google dá "origin_mismatch":** a origem `http://localhost:5173` não está nas *Origens JavaScript autorizadas*.
+
+## E-mails de aviso (opcional)
+
+Além do sininho de notificações, o sistema pode mandar e-mail: ao(s) responsável(is) quando alguém solicita a sala, e ao solicitante quando a reserva é aprovada, recusada ou cancelada pela autoridade.
+Para ligar, preencha no `backend/.env` as variáveis `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (e, se quiser o link no e-mail, `APP_URL`) — veja `.env.example`.
+Sem `SMTP_HOST` o sistema funciona normalmente, apenas sem enviar e-mails. Falha no envio nunca desfaz uma reserva (fica só no log do servidor).

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, fmtDataHora } from '../api';
 import { useMe } from '../App';
+import { IconeLixeira } from './MinhasReservas';
 
 interface N { id: number; mensagem: string; lida: boolean; criado_em: string }
 
@@ -15,6 +16,12 @@ export default function Notificacoes() {
     });
   }, [refresh]);
 
+  const excluir = async (id: number) => {
+    if (!confirm('Excluir esta notificação? Essa ação não pode ser desfeita.')) return;
+    await api(`/api/notificacoes/${id}`, { method: 'DELETE' });
+    setLista((l) => l && l.filter((n) => n.id !== id));
+  };
+
   return (
     <>
       <h1 className="page-title">Notificações</h1>
@@ -22,7 +29,10 @@ export default function Notificacoes() {
       <div className="stack">
         {lista?.map((n) => (
           <div key={n.id} className={`card notif ${n.lida ? '' : 'notif-nova'}`}>
-            <p>{n.mensagem}</p>
+            <div className="card-head">
+              <p>{n.mensagem}</p>
+              <button className="trash" title="Excluir notificação" aria-label="Excluir notificação" onClick={() => excluir(n.id)}><IconeLixeira /></button>
+            </div>
             <span className="muted small">{fmtDataHora(n.criado_em)}</span>
           </div>
         ))}
