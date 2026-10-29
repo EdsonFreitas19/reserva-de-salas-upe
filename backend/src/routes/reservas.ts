@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { isExclusionViolation, pool, tx } from '../db.js';
-import { enviarEmailsDasNotificacoes } from '../email.js';
+import { enviarEmailsDasNotificacoes, type EventoEmail } from '../email.js';
 import { isAdmin, podeDecidir, requireAdmin, requireAuth } from '../auth.js';
 import { regras } from '../config.js';
 import { lerRegrasReserva } from './configuracao.js';
@@ -22,16 +22,20 @@ async function registrarHistorico(
   );
 }
 // Notificações criadas dentro de cada transação: os e-mails só saem depois que ela for confirmada (commit)
-const notificacoesDaTx = new WeakMap<PoolClient, number[]>();
-async function notificar(c: PoolClient, usuarioId: number, reservaId: number, mensagem: string) {
+const notificacoesDaTx = new WeakMap<PoolClient, EventoEmail[]>();
+/** Grava o aviso do sininho e anota o que aconteceu (tipo, quem fez, motivo) para montar o e-mail depois do commit. */
+async function notificar(
+  c: PoolClient, usuarioId: number, reservaId: number, mensagem: string,
+  evento: { tipo: EventoEmail['tipo']; autor: string; motivo?: string },
+) {
   const r = await c.query('INSERT INTO notificacao (usuario_id, reserva_id, mensagem) VALUES ($1,$2,$3) RETURNING id', [usuarioId, reservaId, mensagem]);
-  notificacoesDaTx.get(c)?.push(r.rows[0].id);
+  notificacoesDaTx.get(c)?.push({ notificacaoId: r.rows[0].id, reservaId, ...evento });
 }
 /** Igual a tx(), mas depois do commit manda por e-mail as notificações criadas (se o envio estiver configurado). */
 async function txComEmail<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
-  const ids: number[] = [];
-  const out = await tx(async (c) => { notificacoesDaTx.set(c, ids); return fn(c); });
-  enviarEmailsDasNotificacoes(ids);
+  const eventos: EventoEmail[] = [];
+  const out = await tx(async (c) => { notificacoesDaTx.set(c, eventos); return fn(c); });
+  enviarEmailsDasNotificacoes(eventos);
   return out;
 }
 
@@ -93,7 +97,7 @@ export async function reservaRoutes(app: FastifyInstance) {
       await registrarHistorico(c, rid, null, 'PENDENTE', req.auth.id);
       const auts = await c.query('SELECT usuario_id FROM ambiente_autoridade WHERE ambiente_id = $1', [b.ambiente_id]);
       for (const a of auts.rows)
-        await notificar(c, a.usuario_id, rid, `Nova solicitação para ${amb.rows[0].nome} (${fmt(inicio)}) de ${req.auth.nome}`);
+        await notificar(c, a.usuario_id, rid, `Nova solicitação para ${amb.rows[0].nome} (${fmt(inicio)}) de ${req.auth.nome}`, { tipo: 'NOVA', autor: req.auth.nome });
       return rid;
     });
     return reply.code(201).send({ id });
@@ -157,7 +161,7 @@ export async function reservaRoutes(app: FastifyInstance) {
       if (res.status === 'APROVADA') {
         const auts = await c.query('SELECT usuario_id FROM ambiente_autoridade WHERE ambiente_id = $1', [res.ambiente_id]);
         for (const a of auts.rows)
-          await notificar(c, a.usuario_id, id, `${req.auth.nome} cancelou a reserva de ${res.ambiente_nome} (${fmt(res.inicio)})`);
+          await notificar(c, a.usuario_id, id, `${req.auth.nome} cancelou a reserva de ${res.ambiente_nome} (${fmt(res.inicio)})`, { tipo: 'CANCELADA_PELO_SOLICITANTE', autor: req.auth.nome });
       }
     });
     return { ok: true };
@@ -199,7 +203,7 @@ export async function reservaRoutes(app: FastifyInstance) {
         [id, req.auth.id, motivo]);
       await registrarHistorico(c, id, 'APROVADA', 'CANCELADA', req.auth.id, motivo);
       await notificar(c, res.solicitante_id, id,
-        `Sua reserva de ${res.ambiente_nome} (${fmt(res.inicio)}) foi CANCELADA por ${req.auth.nome}: ${motivo}`);
+        `Sua reserva de ${res.ambiente_nome} (${fmt(res.inicio)}) foi CANCELADA por ${req.auth.nome}: ${motivo}`, { tipo: 'CANCELADA', autor: req.auth.nome, motivo });
     });
     return { ok: true };
   });
@@ -248,7 +252,7 @@ export async function reservaRoutes(app: FastifyInstance) {
         await c.query(
           "UPDATE reserva SET status = 'APROVADA', decidido_por_id = $2, decidido_em = now() WHERE id = $1", [id, req.auth.id]);
         await registrarHistorico(c, id, 'PENDENTE', 'APROVADA', req.auth.id);
-        await notificar(c, res.solicitante_id, id, `Sua reserva de ${res.ambiente_nome} (${fmt(res.inicio)}) foi APROVADA`);
+        await notificar(c, res.solicitante_id, id, `Sua reserva de ${res.ambiente_nome} (${fmt(res.inicio)}) foi APROVADA`, { tipo: 'APROVADA', autor: req.auth.nome });
 
         // Recusa automática das pendentes do mesmo ambiente que colidem com a aprovada
         const motivo = 'Recusada automaticamente: outra solicitação foi aprovada para este horário';
@@ -261,7 +265,8 @@ export async function reservaRoutes(app: FastifyInstance) {
         for (const o of outras.rows) {
           await registrarHistorico(c, o.id, 'PENDENTE', 'RECUSADA', req.auth.id, motivo);
           await notificar(c, o.solicitante_id, o.id,
-            `Sua reserva de ${res.ambiente_nome} (${fmt(o.inicio)}) foi RECUSADA automaticamente: outra solicitação foi aprovada para esse horário`);
+            `Sua reserva de ${res.ambiente_nome} (${fmt(o.inicio)}) foi RECUSADA automaticamente: outra solicitação foi aprovada para esse horário`,
+            { tipo: 'RECUSADA', autor: req.auth.nome, motivo: 'Outra solicitação foi aprovada para esse mesmo horário.' });
         }
       });
     } catch (e) {
@@ -287,7 +292,7 @@ export async function reservaRoutes(app: FastifyInstance) {
         "UPDATE reserva SET status = 'RECUSADA', decidido_por_id = $2, decidido_em = now(), justificativa_recusa = $3 WHERE id = $1",
         [id, req.auth.id, justificativa]);
       await registrarHistorico(c, id, 'PENDENTE', 'RECUSADA', req.auth.id, justificativa);
-      await notificar(c, res.solicitante_id, id, `Sua reserva de ${res.ambiente_nome} (${fmt(res.inicio)}) foi RECUSADA: ${justificativa}`);
+      await notificar(c, res.solicitante_id, id, `Sua reserva de ${res.ambiente_nome} (${fmt(res.inicio)}) foi RECUSADA: ${justificativa}`, { tipo: 'RECUSADA', autor: req.auth.nome, motivo: justificativa });
     });
     return { ok: true };
   });

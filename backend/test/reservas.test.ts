@@ -535,11 +535,11 @@ describe('área do responsável: horários ocupados e diretório de usuários', 
 });
 
 describe('e-mails de aviso', () => {
-  const enviados: { to: string; subject: string; text: string }[] = [];
+  const enviados: { to: string; subject: string; text: string; html: string }[] = [];
   beforeAll(() => {
     const t = nodemailer.createTransport({ jsonTransport: true });
     const original = t.sendMail.bind(t);
-    (t as unknown as { sendMail: unknown }).sendMail = async (m: { to: string; subject: string; text: string }) => { enviados.push(m); return original(m as never); };
+    (t as unknown as { sendMail: unknown }).sendMail = async (m: { to: string; subject: string; text: string; html: string }) => { enviados.push(m); return original(m as never); };
     usarTransporteDeTeste(t);
   });
   const paraQuem = (email: string) => enviados.filter((m) => m.to === email);
@@ -559,7 +559,9 @@ describe('e-mails de aviso', () => {
     expect((await aprovar(AUT, r.json().id)).statusCode).toBe(200);
     await aguardarEmails();
     expect(paraQuem(A)).toHaveLength(1);
-    expect(paraQuem(A)[0].text).toMatch(/APROVADA/);
+    expect(paraQuem(A)[0].text).toMatch(/aprovada/);
+    expect(paraQuem(A)[0].html).toContain('cid:logo-upe'); // logo da UPE no cabeçalho
+    expect(paraQuem(A)[0].html).toContain('Atenciosamente');
   });
 
   it('recusa: e-mail para o solicitante com a justificativa', async () => {
@@ -569,7 +571,31 @@ describe('e-mails de aviso', () => {
     expect((await call(AUT, 'POST', `/api/reservas/${r.json().id}/recusar`, { justificativa: 'Sala em manutenção' })).statusCode).toBe(200);
     await aguardarEmails();
     expect(paraQuem(B)).toHaveLength(1);
-    expect(paraQuem(B)[0].text).toMatch(/RECUSADA.*Sala em manutenção/);
+    expect(paraQuem(B)[0].subject).toMatch(/Reserva recusada/);
+    expect(paraQuem(B)[0].text).toMatch(/não pôde ser atendida/);
+    expect(paraQuem(B)[0].text).toMatch(/Sala em manutenção/);
+  });
+
+  it('cancelamento pela autoridade: e-mail ao solicitante com o motivo; cancelamento pelo solicitante: e-mail aos responsáveis', async () => {
+    const r1 = await pedir(A, 53, 9, 10, 'Cancelar pela autoridade');
+    expect((await aprovar(AUT, r1.json().id)).statusCode).toBe(200);
+    await aguardarEmails();
+    enviados.length = 0;
+    expect((await call(AUT, 'POST', `/api/reservas/${r1.json().id}/cancelar-pela-autoridade`, { motivo: 'Evento institucional' })).statusCode).toBe(200);
+    await aguardarEmails();
+    expect(paraQuem(A)).toHaveLength(1);
+    expect(paraQuem(A)[0].subject).toMatch(/Reserva cancelada/);
+    expect(paraQuem(A)[0].text).toMatch(/Evento institucional/);
+
+    const r2 = await pedir(B, 54, 9, 10, 'Cancelar pelo solicitante');
+    expect((await aprovar(AUT, r2.json().id)).statusCode).toBe(200);
+    await aguardarEmails();
+    enviados.length = 0;
+    expect((await call(B, 'POST', `/api/reservas/${r2.json().id}/cancelar`)).statusCode).toBe(200);
+    await aguardarEmails();
+    expect(paraQuem(AUT)).toHaveLength(1);
+    expect(paraQuem(AUT2)).toHaveLength(1);
+    expect(paraQuem(AUT)[0].subject).toMatch(/cancelada pelo solicitante/);
   });
 
   it('pedido rejeitado (erro de validação) não envia e-mail nenhum', async () => {

@@ -40,14 +40,7 @@ No sistema só existem **dois perfis**: **Usuário** (professor ou funcionário 
 
 Quem é responsável também vê a etiqueta "Responsável por N ambientes" no topo e "Você é responsável" nos cartões das salas. O administrador continua cadastrando ambientes, definindo os responsáveis de cada sala e vendo todas as reservas.
 
-Na tela de login aparece o **"Modo de desenvolvimento"**, com **dois** usuários de teste (sem precisar de Google):
-
-| Usuário de teste | Quem é | O que testar |
-|---|---|---|
-| Usuário Demo | Usuário comum que **também é responsável** pelas salas de exemplo | reservar salas, e na aba Aprovações aprovar/recusar/cancelar e administrar as salas dele |
-| Admin Demo | Administrador (**não aprova reservas** e não pode ser responsável por sala) | cadastrar/editar/desativar/**excluir** ambientes, **designar os responsáveis de cada ambiente** (aba **Usuários**: lista todo mundo e permite escolher a sala de cada pessoa, ou pelo e-mail na aba Ambientes), cadastrar horários ocupados e ver todas as reservas |
-
-**Roteiro rápido (2 logins):** entre como *Usuário Demo* → Ambientes → Auditório → solicite um horário (o Usuário Demo é o responsável das salas de exemplo, então ele mesmo aprova em Aprovações → Pendentes). Entre como *Admin Demo* → Administração → **Usuários** para ver todos e designar quem é responsável por cada sala; o admin não vê botões de aprovar.
+A tela de login tem **uma única entrada: "Entrar com o Google"**. O perfil (administrador ou usuário comum) é definido pelo e-mail da conta; não há tela separada para o administrador. A caixa de "usuários de teste" foi retirada da tela. Os testes automáticos ainda usam um acesso de teste do servidor, que só existe com `DEV_LOGIN=true` e deve ficar `false` fora do desenvolvimento.
 
 **Definir os responsáveis de uma sala:** entre como *Admin* → Administração → na linha do ambiente, "Responsáveis e horários" → digite o e-mail do professor/funcionário (precisa estar na lista de autorizados) e clique em "Adicionar responsável". Pode haver mais de um por sala (basta um aprovar). Se a pessoa nunca entrou no sistema, ela é pré-cadastrada e, ao fazer login com o Google, já aparece como autoridade daquele ambiente. Um professor ou funcionário pode ser autoridade de uma ou mais salas e continuar solicitando reservas nas demais. Ambientes sem responsável não aceitam solicitações.
 
